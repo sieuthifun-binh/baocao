@@ -4,7 +4,7 @@ import plotly.express as px
 import streamlit as st
 
 st.set_page_config(
-    page_title="Hệ thống Quản lý & Phân tích Thu nộp",
+    page_title="Hệ thống Quản lý & Phân tích Thu nộp Đơn vị",
     page_icon="📊",
     layout="wide",
 )
@@ -16,7 +16,6 @@ st.markdown(
     " **KH Thu**."
 )
 
-# Tab giao diện chức năng
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📥 Nhập liệu & Cập nhật",
     "📋 Báo cáo Chi tiết",
@@ -34,8 +33,11 @@ if uploaded_file is not None:
     xls = pd.ExcelFile(uploaded_file)
     sheet_names = xls.sheet_names
 
-    # Đọc sheet Cập nhật gốc
+    # Đọc sheet Cập nhật an toàn
     df_capnhat = pd.read_excel(uploaded_file, sheet_name="Cập nhật")
+
+    # Chuẩn hóa tên cột để tránh lỗi khoảng trắng thừa
+    df_capnhat.columns = [str(c).strip() for c in df_capnhat.columns]
 
     with tab1:
       st.subheader(
@@ -50,15 +52,14 @@ if uploaded_file is not None:
           df_capnhat, num_rows="dynamic", use_container_width=True
       )
 
-      # Cho phép tải file hoàn chỉnh sau khi cập nhật
+      # Xuất file Excel bảo toàn các sheet khác
       buffer = io.BytesIO()
       with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         edited_df.to_excel(writer, sheet_name="Cập nhật", index=False)
         for s in sheet_names:
           if s != "Cập nhật":
-            pd.read_excel(uploaded_file, sheet_name=s).to_excel(
-                writer, sheet_name=s, index=False
-            )
+            df_other = pd.read_excel(uploaded_file, sheet_name=s)
+            df_other.to_excel(writer, sheet_name=s, index=False)
       buffer.seek(0)
 
       st.download_button(
@@ -74,58 +75,83 @@ if uploaded_file is not None:
       st.subheader(
           "2. Sheet Chi tiết (Lọc theo tên User / Chuyên quản cột D)"
       )
-      if "dsnv" in edited_df.columns:
-        users = edited_df["dsnv"].dropna().unique().tolist()
-        selected_user = st.selectbox(
-            "Chọn tên User / Chuyên quản để lọc báo cáo chi tiết:", users
-        )
+      user_col = "dsnv" if "dsnv" in edited_df.columns else None
+      if user_col:
+        users = edited_df[user_col].dropna().unique().tolist()
+        if users:
+          selected_user = st.selectbox(
+              "Chọn tên User / Chuyên quản để lọc báo cáo chi tiết:", users
+          )
+          df_filtered_user = edited_df[edited_df[user_col] == selected_user]
+          st.info(
+              f"Hiển thị danh sách đơn vị do chuyên quản **{selected_user}** phụ"
+              f" trách ({len(df_filtered_user)} đơn vị):"
+          )
 
-        df_filtered_user = edited_df[edited_df["dsnv"] == selected_user]
-        st.info(
-            f"Hiển thị danh sách đơn vị do chuyên quản **{selected_user}** phụ"
-            f" trách ({len(df_filtered_user)} đơn vị):"
-        )
-        st.dataframe(
-            df_filtered_user[
-                ["madvi", "tendvi", "sld", "tyleno", "tylenoyt", "_tien_ck"]
-            ],
-            use_container_width=True,
-        )
+          display_cols = [
+              c
+              for c in [
+                  "madvi",
+                  "tendvi",
+                  "sld",
+                  "tyleno",
+                  "tylenoyt",
+                  "_tien_ck",
+              ]
+              if c in edited_df.columns
+          ]
+          st.dataframe(df_filtered_user[display_cols], use_container_width=True)
+        else:
+          st.warning("Không có dữ liệu trong cột chuyên quản.")
       else:
         st.warning("Không tìm thấy cột chuyên quản (dsnv) trong file.")
 
     with tab3:
       st.subheader("3. Sheet Nợ (Phân tích số liệu đơn vị nợ)")
-      if "_tien_ck" in edited_df.columns:
-        df_no = edited_df[edited_df["_tien_ck"] > 0].copy()
+      debt_col = "_tien_ck" if "_tien_ck" in edited_df.columns else None
+      if debt_col:
+        edited_df[debt_col] = pd.to_numeric(
+            edited_df[debt_col], errors="coerce"
+        ).fillna(0)
+        df_no = edited_df[edited_df[debt_col] > 0].copy()
         st.warning(
             f"Tổng số đơn vị còn nợ tiền cuối kỳ: **{len(df_no)} đơn vị**"
         )
-        st.dataframe(
-            df_no[
-                [
-                    "madvi",
-                    "tendvi",
-                    "sld",
-                    "tyleno",
-                    "_tien_dk",
-                    "_tien_unc",
-                    "_tien_ck",
-                ]
-            ],
-            use_container_width=True,
-        )
+
+        no_cols = [
+            c
+            for c in [
+                "madvi",
+                "tendvi",
+                "sld",
+                "tyleno",
+                "_tien_dk",
+                "_tien_unc",
+                "_tien_ck",
+            ]
+            if c in edited_df.columns
+        ]
+        st.dataframe(df_no[no_cols], use_container_width=True)
       else:
         st.warning("Không tìm thấy cột số tiền cuối kỳ (_tien_ck).")
 
     with tab4:
       st.subheader("4. Sheet KH Thu (Tổng hợp kế hoạch thu)")
-      if "pst" in edited_df.columns and "_tien_ck" in edited_df.columns:
-        total_kh = edited_df["pst"].sum()
-        total_thu = edited_df.get(
-            "_tien_unc", pd.Series([0] * len(edited_df))
-        ).sum()
-        total_no = edited_df["_tien_ck"].sum()
+      pst_col = "pst" if "pst" in edited_df.columns else None
+      unc_col = "_tien_unc" if "_tien_unc" in edited_df.columns else None
+
+      if pst_col and debt_col:
+        edited_df[pst_col] = pd.to_numeric(
+            edited_df[pst_col], errors="coerce"
+        ).fillna(0)
+        if unc_col:
+          edited_df[unc_col] = pd.to_numeric(
+              edited_df[unc_col], errors="coerce"
+          ).fillna(0)
+
+        total_kh = edited_df[pst_col].sum()
+        total_thu = edited_df[unc_col].sum() if unc_col else 0
+        total_no = edited_df[debt_col].sum()
 
         col1, col2, col3 = st.columns(3)
         col1.metric("Tổng Kế hoạch Thu", f"{total_kh:,.0f} VNĐ")
@@ -139,9 +165,9 @@ if uploaded_file is not None:
               edited_df.groupby("makhoi")
               .agg({
                   "madvi": "count",
-                  "sld": "sum",
-                  "pst": "sum",
-                  "_tien_ck": "sum",
+                  "sld": "sum" if "sld" in edited_df.columns else "count",
+                  pst_col: "sum",
+                  debt_col: "sum",
               })
               .reset_index()
           )
@@ -158,32 +184,33 @@ if uploaded_file is not None:
 
     with tab5:
       st.subheader("5. Biểu đồ Trực quan hóa Dữ liệu")
-      if "makhoi" in edited_df.columns and "_tien_ck" in edited_df.columns:
+      if "makhoi" in edited_df.columns and debt_col:
+        chart_data = edited_df.groupby("makhoi")[debt_col].sum().reset_index()
         fig = px.bar(
-            edited_df.groupby("makhoi")["_tien_ck"].sum().reset_index(),
+            chart_data,
             x="makhoi",
-            y="_tien_ck",
+            y=debt_col,
             title="Tổng số tiền nợ theo Khối đơn vị",
-            labels={"makhoi": "Khối đơn vị", "_tien_ck": "Số tiền nợ (VNĐ)"},
+            labels={"makhoi": "Khối đơn vị", debt_col: "Số tiền nợ (VNĐ)"},
             color="makhoi",
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        if "sld" in edited_df.columns:
+        if "sld" in edited_df.columns and pst_col:
           fig2 = px.scatter(
               edited_df,
               x="sld",
-              y="_tien_ck",
-              size="pst",
+              y=debt_col,
+              size=pst_col,
               color="makhoi",
-              hover_name="tendvi",
+              hover_name="tendvi" if "tendvi" in edited_df.columns else None,
               title="Tương quan giữa Số lao động và Số tiền nợ",
-              labels={"sld": "Số lao động", "_tien_ck": "Số tiền nợ"},
+              labels={"sld": "Số lao động", debt_col: "Số tiền nợ"},
           )
           st.plotly_chart(fig2, use_container_width=True)
 
   except Exception as e:
-    st.error(f"Đã xảy ra lỗi khi đọc file: {e}")
+    st.error(f"Đã xảy ra lỗi khi xử lý file: {e}")
 else:
   st.info(
       "👈 Vui lòng tải file Excel nguồn lên ở thanh bên trái (Sidebar) để khởi"
