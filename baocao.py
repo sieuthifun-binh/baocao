@@ -36,8 +36,14 @@ if uploaded_file is not None:
     # Đọc sheet Cập nhật an toàn
     df_capnhat = pd.read_excel(uploaded_file, sheet_name="Cập nhật")
 
-    # Chuẩn hóa tên cột để tránh lỗi khoảng trắng thừa
+    # Chuẩn hóa tên cột (tránh khoảng trắng thừa)
     df_capnhat.columns = [str(c).strip() for c in df_capnhat.columns]
+
+    # Hàm phụ trợ ép kiểu an toàn cho các cột số
+    def safe_numeric(df, col_name):
+      if col_name in df.columns:
+        return pd.to_numeric(df[col_name], errors="coerce").fillna(0)
+      return 0
 
     with tab1:
       st.subheader(
@@ -110,9 +116,7 @@ if uploaded_file is not None:
       st.subheader("3. Sheet Nợ (Phân tích số liệu đơn vị nợ)")
       debt_col = "_tien_ck" if "_tien_ck" in edited_df.columns else None
       if debt_col:
-        edited_df[debt_col] = pd.to_numeric(
-            edited_df[debt_col], errors="coerce"
-        ).fillna(0)
+        edited_df[debt_col] = safe_numeric(edited_df, debt_col)
         df_no = edited_df[edited_df[debt_col] > 0].copy()
         st.warning(
             f"Tổng số đơn vị còn nợ tiền cuối kỳ: **{len(df_no)} đơn vị**"
@@ -141,13 +145,9 @@ if uploaded_file is not None:
       unc_col = "_tien_unc" if "_tien_unc" in edited_df.columns else None
 
       if pst_col and debt_col:
-        edited_df[pst_col] = pd.to_numeric(
-            edited_df[pst_col], errors="coerce"
-        ).fillna(0)
+        edited_df[pst_col] = safe_numeric(edited_df, pst_col)
         if unc_col:
-          edited_df[unc_col] = pd.to_numeric(
-              edited_df[unc_col], errors="coerce"
-          ).fillna(0)
+          edited_df[unc_col] = safe_numeric(edited_df, unc_col)
 
         total_kh = edited_df[pst_col].sum()
         total_thu = edited_df[unc_col].sum() if unc_col else 0
@@ -185,6 +185,7 @@ if uploaded_file is not None:
     with tab5:
       st.subheader("5. Biểu đồ Trực quan hóa Dữ liệu")
       if "makhoi" in edited_df.columns and debt_col:
+        edited_df[debt_col] = safe_numeric(edited_df, debt_col)
         chart_data = edited_df.groupby("makhoi")[debt_col].sum().reset_index()
         fig = px.bar(
             chart_data,
@@ -197,6 +198,7 @@ if uploaded_file is not None:
         st.plotly_chart(fig, use_container_width=True)
 
         if "sld" in edited_df.columns and pst_col:
+          edited_df["sld"] = safe_numeric(edited_df, "sld")
           fig2 = px.scatter(
               edited_df,
               x="sld",
