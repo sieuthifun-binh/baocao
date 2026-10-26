@@ -1,193 +1,146 @@
-import streamlit as st
-import pandas as pd
+import re
 import io
+import pandas as pd
+import streamlit as st
 
 st.set_page_config(
-    page_title="Hệ thống So sánh & Đối soát Dữ liệu Excel",
-    layout="wide"
+    page_title="Đối soát BHYT và Dân cư UBND", page_icon="📊", layout="wide"
 )
 
-st.title("📊 Hệ thống So sánh & Đối soát Dữ liệu Excel")
-st.markdown("Tải lên **File dữ liệu nguồn** và **File dữ liệu gốc** để kiểm tra và đối soát thông tin.")
+st.title(
+    "📊 Ứng dụng Đối soát Dữ liệu BHYT với Cơ sở Dữ liệu Dân cư UBND Phường An"
+    " Dương"
+)
+st.markdown(
+    "Tải lên tệp BHYT và tệp Dân cư UBND để hệ thống tự động lọc, so sánh theo"
+    " **CCCD/Định danh** và **Họ tên / Năm sinh**."
+)
 
-# --- BƯỚC 1: UPLOAD FILE ---
-st.header("1. Tải lên dữ liệu")
-col1, col2 = st.columns(2)
+# Khu vực tải file lên giao diện web
+st.sidebar.header("📁 Tải tệp dữ liệu lên")
+uploaded_bhyt = st.sidebar.file_uploader(
+    "Chọn tệp BHYT (Excel)", type=["xlsx", "xls"]
+)
+uploaded_ubnd = st.sidebar.file_uploader(
+    "Chọn tệp Dân cư UBND (Excel)", type=["xlsx", "xls"]
+)
 
-with col1:
-    source_file = st.file_uploader("Chọn File Dữ liệu Nguồn (.xlsx, .xls)", type=["xlsx", "xls"], key="source")
 
-with col2:
-    master_file = st.file_uploader("Chọn File Dữ liệu Gốc (.xlsx, .xls)", type=["xlsx", "xls"], key="master")
+def clean_text(text):
+  if pd.isna(text):
+    return ""
+  return re.sub(r"\s+", " ", str(text)).strip().upper()
 
-# --- HÀM CHUẨN HÓA DỮ LIỆU ---
-def normalize_string(val):
-    if pd.isna(val) or val is None:
-        return ""
-    # Chuyển về chuỗi, loại bỏ khoảng trắng thừa, viết hoa để so sánh
-    val_str = str(val).strip()
-    # Nếu là dạng float như "123456789.0" thì xóa ".0"
-    if val_str.endswith(".0"):
-        val_str = val_str[:-2]
-    return " ".join(val_str.split()).upper()
 
-def normalize_date(val):
-    if pd.isna(val) or val is None:
-        return ""
-    try:
-        # Chuyển đổi về định dạng ngày YYYY-MM-DD
-        dt = pd.to_datetime(val, dayfirst=True, errors='coerce')
-        if pd.notna(dt):
-            return dt.strftime('%Y-%m-%d')
-    except Exception:
-        pass
-    return str(val).strip()
+def extract_year(val):
+  if pd.isna(val):
+    return None
+  match = re.search(r"\b(19\d{2}|20\d{2})\b", str(val))
+  return int(match.group(1)) if match else None
 
-def normalize_id(val):
-    if pd.isna(val) or val is None:
-        return ""
-    val_str = str(val).strip()
-    if val_str.endswith(".0"):
-        val_str = val_str[:-2]
-    # Bổ sung số 0 ở đầu nếu CCCD bị mất số 0 (đủ 12 số hoặc 9 số)
-    if len(val_str) == 11 and val_str.isdigit():
-        val_str = "0" + val_str
-    elif len(val_str) == 8 and val_str.isdigit():
-        val_str = "0" + val_str
-    return val_str
 
-if source_file and master_file:
-    # Đọc danh sách sheet
-    xls_source = pd.ExcelFile(source_file)
-    xls_master = pd.ExcelFile(master_file)
-    
-    st.header("2. Cấu hình Cột & Ánh xạ Dữ liệu")
-    col_config1, col_config2 = st.columns(2)
-    
-    with col_config1:
-        st.subheader("📌 File Nguồn")
-        sheet_source = st.selectbox("Chọn Sheet File Nguồn:", xls_source.sheet_names, key="s_sheet")
-        df_source_raw = pd.read_excel(source_file, sheet_name=sheet_source)
-        
-        cols_source = list(df_source_raw.columns)
-        src_name = st.selectbox("Cột Họ và Tên (Nguồn):", cols_source, index=0 if len(cols_source) > 0 else 0)
-        src_dob = st.selectbox("Cột Ngày Tháng Năm Sinh (Nguồn):", cols_source, index=1 if len(cols_source) > 1 else 0)
-        src_id = st.selectbox("Cột Số CCCD/CMND (Nguồn):", cols_source, index=2 if len(cols_source) > 2 else 0)
+if uploaded_bhyt and uploaded_ubnd:
+  with st.spinner("Đang đọc và xử lý dữ liệu, vui lòng chờ..."):
+    # Đọc dữ liệu
+    df_bhyt = pd.read_excel(uploaded_bhyt, sheet_name=0)
+    df_ubnd = pd.read_excel(uploaded_ubnd, sheet_name=0)
 
-    with col_config2:
-        st.subheader("📌 File Dữ liệu Gốc")
-        sheet_master = st.selectbox("Chọn Sheet File Gốc:", xls_master.sheet_names, key="m_sheet")
-        df_master_raw = pd.read_excel(master_file, sheet_name=sheet_master)
-        
-        cols_master = list(df_master_raw.columns)
-        mst_name = st.selectbox("Cột Họ và Tên (Gốc):", cols_master, index=0 if len(cols_master) > 0 else 0)
-        mst_dob = st.selectbox("Cột Ngày Tháng Năm Sinh (Gốc):", cols_master, index=1 if len(cols_master) > 1 else 0)
-        mst_id = st.selectbox("Cột Số CCCD/CMND (Gốc):", cols_master, index=2 if len(cols_master) > 2 else 0)
+    # Chuẩn hóa cột
+    df_bhyt["CCCD_CLN"] = (
+        df_bhyt["SO_CMND"]
+        .astype(str)
+        .str.replace(r"\.0$", "", regex=True)
+        .str.strip()
+        .str.upper()
+    )
+    df_ubnd["CCCD_CLN"] = (
+        df_ubnd["Đinh danh"]
+        .astype(str)
+        .str.replace(r"\.0$", "", regex=True)
+        .str.strip()
+        .str.upper()
+    )
 
-    if st.button("🚀 Thực hiện So sánh"):
-        with st.spinner("Đang xử lý và so sánh dữ liệu..."):
-            # Copy dataframe để xử lý
-            df_src = df_source_raw.copy()
-            df_mst = df_master_raw.copy()
+    df_bhyt["HO_TEN_CLN"] = df_bhyt["HO_TEN"].apply(clean_text)
+    df_ubnd["HO_TEN_CLN"] = df_ubnd["Họ và tên"].apply(clean_text)
 
-            # Tạo cột chuẩn hóa
-            df_src['_norm_name'] = df_src[src_name].apply(normalize_string)
-            df_src['_norm_dob'] = df_src[src_dob].apply(normalize_date)
-            df_src['_norm_id'] = df_src[src_id].apply(normalize_id)
+    df_bhyt["NAM_SINH"] = df_bhyt["NGAY_SINH"].apply(extract_year)
+    df_ubnd["NAM_SINH"] = df_ubnd["NTNS"].apply(extract_year)
 
-            df_mst['_norm_name'] = df_mst[mst_name].apply(normalize_string)
-            df_mst['_norm_dob'] = df_mst[mst_dob].apply(normalize_date)
-            df_mst['_norm_id'] = df_mst[mst_id].apply(normalize_id)
+    # Thống kê tổng quan
+    col1, col2 = st.columns(2)
+    col1.metric("Tổng số bản ghi BHYT", len(df_bhyt))
+    col2.metric("Tổng số nhân khẩu UBND", len(df_ubnd))
 
-            # Tạo khóa tổng hợp
-            df_src['_key_exact'] = df_src['_norm_name'] + "|" + df_src['_norm_dob'] + "|" + df_src['_norm_id']
-            df_mst['_key_exact'] = df_mst['_norm_name'] + "|" + df_mst['_norm_dob'] + "|" + df_mst['_norm_id']
+    # 1. Khớp chính xác qua CCCD
+    matched_by_cccd = pd.merge(
+        df_bhyt,
+        df_ubnd,
+        on="CCCD_CLN",
+        how="inner",
+        suffixes=("_bhyt", "_ubnd"),
+    )
 
-            # Set dùng để tra cứu nhanh từ dữ liệu gốc
-            master_exact_keys = set(df_mst['_key_exact'])
-            master_id_map = df_mst.set_index('_norm_id').to_dict(orient='index')
+    st.subheader(
+        f"✅ 1. Danh sách khớp chính xác theo CCCD ({len(matched_by_cccd)} người)"
+    )
+    st.dataframe(matched_by_cccd.head(100))
 
-            # Phân loại kết quả
-            exact_matches = []
-            mismatches = []
-            not_found = []
+    # 2. Xử lý phần chưa khớp CCCD -> Khớp theo Họ Tên & Năm sinh
+    unmatched_bhyt = df_bhyt[
+        ~df_bhyt["CCCD_CLN"].isin(matched_by_cccd["CCCD_CLN"])
+    ]
 
-            for idx, row in df_src.iterrows():
-                key = row['_key_exact']
-                cccd = row['_norm_id']
-                
-                # 1. Trùng khớp hoàn toàn cả 3 trường
-                if key in master_exact_keys:
-                    row_dict = row.to_dict()
-                    row_dict['Trạng thái'] = "Trùng khớp hoàn toàn"
-                    exact_matches.append(row_dict)
-                
-                # 2. Tìm thấy theo CCCD nhưng sai Tên hoặc Ngày sinh
-                elif cccd in master_id_map and cccd != "":
-                    matched_mst = master_id_map[cccd]
-                    row_dict = row.to_dict()
-                    row_dict['Trạng thái'] = "Sai lệch thông tin"
-                    row_dict['Tên ở File Gốc'] = matched_mst.get(mst_name, "")
-                    row_dict['Ngày sinh ở File Gốc'] = matched_mst.get(mst_dob, "")
-                    row_dict['CCCD ở File Gốc'] = matched_mst.get(mst_id, "")
-                    mismatches.append(row_dict)
-                
-                # 3. Không tìm thấy thông tin trong file gốc
-                else:
-                    row_dict = row.to_dict()
-                    row_dict['Trạng thái'] = "Không có trong file gốc"
-                    not_found.append(row_dict)
+    matched_by_name_list = []
+    for idx, row in unmatched_bhyt.iterrows():
+      name = row["HO_TEN_CLN"]
+      yob = row["NAM_SINH"]
 
-            # Chuyển đổi sang DataFrame
-            df_exact = pd.DataFrame(exact_matches)
-            df_mismatch = pd.DataFrame(mismatches)
-            df_notfound = pd.DataFrame(not_found)
+      candidates = df_ubnd[df_ubnd["HO_TEN_CLN"] == name]
+      if not candidates.empty:
+        if yob:
+          candidates = candidates.copy()
+          candidates["diff"] = abs(candidates["NAM_SINH"] - yob)
+          candidates = candidates.sort_values(by="diff")
+        best_match = candidates.iloc[0].copy()
+        combined = pd.concat([row, best_match], axis=0)
+        matched_by_name_list.append(combined)
 
-            # Xóa các cột hỗ trợ kỹ thuật trước khi hiển thị
-            helper_cols = ['_norm_name', '_norm_dob', '_norm_id', '_key_exact']
-            for df_res in [df_exact, df_mismatch, df_notfound]:
-                if not df_res.empty:
-                    df_res.drop(columns=[c for c in helper_cols if c in df_res.columns], inplace=True)
+    df_matched_by_name = (
+        pd.DataFrame(matched_by_name_list)
+        if matched_by_name_list
+        else pd.DataFrame()
+    )
 
-            # --- HIỂN THỊ KẾT QUẢ ---
-            st.header("3. Kết quả So sánh")
-            
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Tổng số dòng nguồn", len(df_src))
-            c2.metric("Trùng khớp hoàn toàn", len(df_exact))
-            c3.metric("Lệch thông tin / Không thấy", len(df_mismatch) + len(df_notfound))
+    st.subheader(
+        "🔍 2. Danh sách trùng Họ tên & khớp/gần đúng Năm sinh (Chưa khớp"
+        f" CCCD): {len(df_matched_by_name)} người"
+    )
+    if not df_matched_by_name.empty:
+      st.dataframe(df_matched_by_name.head(100))
+    else:
+      st.info("Không tìm thấy trường hợp trùng tên nào khác.")
 
-            tab1, tab2, tab3 = st.tabs([
-                f"✅ Trùng khớp ({len(df_exact)})", 
-                f"⚠️ Sai lệch thông tin ({len(df_mismatch)})", 
-                f"❌ Không tìm thấy ({len(df_notfound)})"
-            ])
+    # Nút tải file kết quả tổng hợp
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+      matched_by_cccd.to_excel(writer, sheet_name="Khop_CCCD", index=False)
+      if not df_matched_by_name.empty:
+        df_matched_by_name.to_excel(
+            writer, sheet_name="Khop_Theo_Ten_Va_Nam_Sinh", index=False
+        )
+    processed_data = output.getvalue()
 
-            with tab1:
-                st.dataframe(df_exact, use_container_width=True)
-
-            with tab2:
-                st.write("Các bản ghi khớp CCCD nhưng lệch Họ tên hoặc Ngày sinh:")
-                st.dataframe(df_mismatch, use_container_width=True)
-
-            with tab3:
-                st.dataframe(df_notfound, use_container_width=True)
-
-            # --- TẠO FILE EXCEL TẢI VỀ ---
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                if not df_exact.empty:
-                    df_exact.to_excel(writer, sheet_name='Trung_Khop', index=False)
-                if not df_mismatch.empty:
-                    df_mismatch.to_excel(writer, sheet_name='Sai_Lech_Thong_Tin', index=False)
-                if not df_notfound.empty:
-                    df_notfound.to_excel(writer, sheet_name='Khong_Tim_Thay', index=False)
-
-            output.seek(0)
-            
-            st.download_button(
-                label="📥 Tải xuống Báo cáo Kết quả Đối soát (.xlsx)",
-                data=output,
-                file_name="Bao_Cao_Doi_Soat_Du_Lieu.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    st.sidebar.markdown("---")
+    st.sidebar.success("Xử lý thành công!")
+    st.sidebar.download_button(
+        label="📥 Tải xuống File Kết Quả (.xlsx)",
+        data=processed_data,
+        file_name="Ket_qua_doi_soat_BHYT_UBND.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+else:
+  st.info(
+      "👈 Vui lòng tải lên cả 2 tệp Excel (BHYT và Dân cư UBND) ở thanh bên trái"
+      " để bắt đầu."
+  )
