@@ -1,3 +1,4 @@
+import glob
 import io
 import re
 import pandas as pd
@@ -12,23 +13,32 @@ st.title(
     " An Dương"
 )
 st.markdown(
-    "Hệ thống tự động đọc dữ liệu từ Cloud, chuẩn hóa định dạng **CCCD/Định"
-    " danh**, đối soát chính xác và tìm kiếm theo **Họ tên & Năm sinh gần"
-    " đúng**."
+    "Hệ thống tự động tìm kiếm tệp dữ liệu trên Cloud, chuẩn hóa định dạng"
+    " **CCCD/Định danh**, đối soát chính xác và tìm kiếm theo **Họ tên & Năm"
+    " sinh gần đúng**."
 )
-
-# Tên 2 file dữ liệu lưu trên GitHub
-BHYT_PATH = "BHYT_03108  bình đồng bộ cccd.xlsx"
-UBND_PATH = "21.8.2026 nhân khẩu thường trú gửi UBND p AD.xlsx"
 
 
 @st.cache_data
 def load_and_process_data():
-  # Đọc 2 file Excel
-  df_bhyt = pd.read_excel(BHYT_PATH, sheet_name=0)
-  df_ubnd = pd.read_excel(UBND_PATH, sheet_name="Sheet1")
+  # Tự động tìm file Excel trong thư mục để tránh lỗi sai tên hoặc khoảng trắng
+  bhyt_files = glob.glob("*BHYT*.xlsx") + glob.glob("*bhyt*.xlsx")
+  ubnd_files = glob.glob("*nhân khẩu*.xlsx") + glob.glob("*UBND*.xlsx")
 
-  # Hàm chuẩn hóa số CCCD / Định danh (đảm bảo đủ 12 chữ số)
+  if not bhyt_files or not ubnd_files:
+    raise FileNotFoundError(
+        "Không tìm thấy file BHYT hoặc file Dân cư UBND trên GitHub. Vui lòng"
+        " kiểm tra lại tên file!"
+    )
+
+  bhyt_path = bhyt_files[0]
+  ubnd_path = ubnd_files[0]
+
+  # Đọc 2 file Excel
+  df_bhyt = pd.read_excel(bhyt_path, sheet_name=0)
+  df_ubnd = pd.read_excel(ubnd_path, sheet_name="Sheet1")
+
+  # Hàm chuẩn hóa số CCCD / Định danh (đủ 12 chữ số)
   def clean_cccd(val):
     if pd.isna(val):
       return ""
@@ -48,7 +58,7 @@ def load_and_process_data():
     match = re.search(r"\b(19\d{2}|20\d{2})\b", str(val))
     return int(match.group(1)) if match else None
 
-  # Tạo các cột phụ trợ chuẩn hóa
+  # Tạo các cột chuẩn hóa
   df_bhyt["CCCD_CLN"] = df_bhyt["SO_CMND"].apply(clean_cccd)
   df_ubnd["CCCD_CLN"] = df_ubnd["Đinh danh"].apply(clean_cccd)
 
@@ -62,9 +72,7 @@ def load_and_process_data():
 
 
 try:
-  with st.spinner(
-      "Đang tải và đồng bộ dữ liệu từ Cloud (có thể mất vài giây)..."
-  ):
+  with st.spinner("Đang tải và đồng bộ dữ liệu, vui lòng chờ..."):
     df_bhyt, df_ubnd = load_and_process_data()
 
   col1, col2 = st.columns(2)
@@ -105,14 +113,13 @@ try:
         candidates = candidates.sort_values(by="diff")
       best_match = candidates.iloc[0]
 
-      # Gộp dữ liệu thành dictionary với hậu tố rõ ràng để tránh trùng lặp tên cột
       combined_dict = {}
       for col in df_bhyt.columns:
         combined_dict[f"{col}_bhyt"] = row[col]
       for col in df_ubnd.columns:
         combined_dict[f"{col}_ubnd"] = best_match[col]
       if "diff" in candidates.columns:
-        combined_dict["chenh_lech_nam_ sinh"] = best_match["diff"]
+        combined_dict["chenh_lech_nam_sinh"] = best_match["diff"]
 
       matched_by_name_list.append(combined_dict)
 
@@ -153,6 +160,6 @@ try:
 except Exception as e:
   st.error(f"Đã xảy ra lỗi trong quá trình xử lý: {e}")
   st.info(
-      "Vui lòng kiểm tra lại xem 2 file Excel đã được tải lên đầy đủ vào thư"
-      " mục gốc của GitHub hay chưa."
+      "💡 Mẹo khắc phục: Hãy kiểm tra chắc chắn rằng 2 file Excel đã được tải"
+      " lên thư mục gốc của GitHub (cùng cấp với file app.py)."
   )
