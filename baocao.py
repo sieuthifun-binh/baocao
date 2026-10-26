@@ -4,155 +4,202 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="Đối soát BHYT và Dân cư UBND", page_icon="📊", layout="wide"
+    page_title="Hệ thống Đối soát Dữ liệu Thông minh", page_icon="📊", layout="wide"
 )
 
-st.title(
-    "📊 Ứng dụng Tự động Đối soát Dữ liệu BHYT & Cơ sở Dữ liệu Dân cư UBND Phường"
-    " An Dương"
-)
+st.title("📊 Ứng dụng Đối soát Dữ liệu Nâng cao (BHYT & Dân cư UBND)")
 st.markdown(
-    "Hệ thống tự động đọc dữ liệu từ Cloud, chuẩn hóa định dạng **CCCD/Định"
-    " danh**, đối soát chính xác và tìm kiếm theo **Họ tên & Năm sinh gần"
-    " đúng**."
+    "Tải lên tệp cần so sánh (**Ô A**) và tệp dân cư gốc (**Ô B**), sau đó tùy"
+    " chỉnh các tiêu chí khớp dữ liệu và khoảng chênh lệch năm sinh trực tiếp"
+    " trên giao diện."
 )
 
-# Tên 2 file dữ liệu lưu trên GitHub
-BHYT_PATH = "BHYT_03108  bình đồng bộ cccd.xlsx"
-UBND_PATH = "21.8.2026 nhân khẩu thường trú gửi UBND p AD.xlsx"
+# --- THANH BÊN (SIDEBAR): UPLOAD FILE & CÀI ĐẶT ---
+st.sidebar.header("📁 1. Tải lên tệp dữ liệu")
+uploaded_file_a = st.sidebar.file_uploader(
+    "Ô A: Tệp cần so sánh (Ví dụ: BHYT)", type=["xlsx", "xls"]
+)
+uploaded_file_b = st.sidebar.file_uploader(
+    "Ô B: Tệp dân cư gốc (Ví dụ: Dân cư UBND)", type=["xlsx", "xls"]
+)
+
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ 2. Tiêu chí tìm kiếm & Lọc")
+tolerance_years = st.sidebar.slider(
+    "Khoảng chênh lệch năm sinh cho phép (Năm)",
+    min_value=0,
+    max_value=5,
+    value=2,
+    step=1,
+)
 
 
-@st.cache_data
-def load_and_process_data():
-  # Đọc 2 file Excel
-  df_bhyt = pd.read_excel(BHYT_PATH, sheet_name=0)
-  df_ubnd = pd.read_excel(UBND_PATH, sheet_name="Sheet1")
-
-  # Hàm chuẩn hóa số CCCD / Định danh (đảm bảo đủ 12 chữ số)
-  def clean_cccd(val):
-    if pd.isna(val):
-      return ""
-    s = str(val).split(".")[0].strip().upper()
-    if s.isdigit() and len(s) < 12:
-      s = s.zfill(12)
-    return s
-
-  def clean_text(text):
-    if pd.isna(text):
-      return ""
-    return re.sub(r"\s+", " ", str(text)).strip().upper()
-
-  def extract_year(val):
-    if pd.isna(val):
-      return None
-    match = re.search(r"\b(19\d{2}|20\d{2})\b", str(val))
-    return int(match.group(1)) if match else None
-
-  # Tạo các cột phụ trợ chuẩn hóa
-  df_bhyt["CCCD_CLN"] = df_bhyt["SO_CMND"].apply(clean_cccd)
-  df_ubnd["CCCD_CLN"] = df_ubnd["Đinh danh"].apply(clean_cccd)
-
-  df_bhyt["HO_TEN_CLN"] = df_bhyt["HO_TEN"].apply(clean_text)
-  df_ubnd["HO_TEN_CLN"] = df_ubnd["Họ và tên"].apply(clean_text)
-
-  df_bhyt["NAM_SINH"] = df_bhyt["NGAY_SINH"].apply(extract_year)
-  df_ubnd["NAM_SINH"] = df_ubnd["NTNS"].apply(extract_year)
-
-  return df_bhyt, df_ubnd
+def clean_cccd(val):
+  if pd.isna(val):
+    return ""
+  s = str(val).split(".")[0].strip().upper()
+  if s.isdigit() and len(s) < 12:
+    s = s.zfill(12)
+  return s
 
 
-try:
-  with st.spinner(
-      "Đang tải và đồng bộ dữ liệu từ Cloud (có thể mất vài giây)..."
-  ):
-    df_bhyt, df_ubnd = load_and_process_data()
+def clean_text(text):
+  if pd.isna(text):
+    return ""
+  return re.sub(r"\s+", " ", str(text)).strip().upper()
 
-  col1, col2 = st.columns(2)
-  col1.metric("Tổng số bản ghi BHYT", f"{len(df_bhyt):,}")
-  col2.metric("Tổng số nhân khẩu UBND", f"{len(df_ubnd):,}")
 
-  # 1. Khớp chính xác theo CCCD
-  matched_by_cccd = pd.merge(
-      df_bhyt,
-      df_ubnd,
-      on="CCCD_CLN",
-      how="inner",
-      suffixes=("_bhyt", "_ubnd"),
-  )
+def extract_year(val):
+  if pd.isna(val):
+    return None
+  match = re.search(r"\b(19\d{2}|20\d{2})\b", str(val))
+  return int(match.group(1)) if match else None
 
-  st.subheader(
-      f"✅ 1. Danh sách khớp chính xác theo Số CCCD / Định danh ("
-      f"{len(matched_by_cccd)} người)"
-  )
-  if not matched_by_cccd.empty:
-    st.dataframe(matched_by_cccd.head(100), use_container_width=True)
-  else:
-    st.info("Không có bản ghi nào trùng khớp tuyệt đối theo CCCD.")
 
-  # 2. Xử lý các trường hợp chưa khớp CCCD -> Khớp theo Họ Tên và Năm sinh gần đúng
-  unmatched_bhyt = df_bhyt[~df_bhyt["CCCD_CLN"].isin(matched_by_cccd["CCCD_CLN"])]
+if uploaded_file_a and uploaded_file_b:
+  try:
+    # Đọc dữ liệu từ file người dùng upload
+    df_a = pd.read_excel(uploaded_file_a, sheet_name=0)
+    df_b = pd.read_excel(uploaded_file_b, sheet_name=0)
 
-  matched_by_name_list = []
-  for idx, row in unmatched_bhyt.iterrows():
-    name = row["HO_TEN_CLN"]
-    yob = row["NAM_SINH"]
+    st.success("Tải dữ liệu thành công!")
 
-    candidates = df_ubnd[df_ubnd["HO_TEN_CLN"] == name]
-    if not candidates.empty:
-      if yob is not None:
-        candidates = candidates.copy()
-        candidates["diff"] = abs(candidates["NAM_SINH"] - yob)
-        candidates = candidates.sort_values(by="diff")
-      best_match = candidates.iloc[0]
+    # --- CẤU HÌNH CỘT ---
+    st.sidebar.markdown("---")
+    st.sidebar.header("Mapping Cột Dữ Liệu")
 
-      # Gộp dữ liệu thành dictionary với hậu tố rõ ràng để tránh trùng lặp tên cột
-      combined_dict = {}
-      for col in df_bhyt.columns:
-        combined_dict[f"{col}_bhyt"] = row[col]
-      for col in df_ubnd.columns:
-        combined_dict[f"{col}_ubnd"] = best_match[col]
-      if "diff" in candidates.columns:
-        combined_dict["chenh_lech_nam_ sinh"] = best_match["diff"]
+    cols_a = df_a.columns.tolist()
+    cols_b = df_b.columns.tolist()
 
-      matched_by_name_list.append(combined_dict)
+    # Tự động gợi ý tên cột nếu có sẵn
+    default_cccd_a = (
+        cols_a.index("SO_CMND") if "SO_CMND" in cols_a else 0
+    )
+    default_name_a = cols_a.index("HO_TEN") if "HO_TEN" in cols_a else 0
+    default_dob_a = cols_a.index("NGAY_SINH") if "NGAY_SINH" in cols_a else 0
 
-  df_matched_by_name = (
-      pd.DataFrame(matched_by_name_list)
-      if matched_by_name_list
-      else pd.DataFrame()
-  )
+    default_cccd_b = cols_b.index("Đinh danh") if "Đinh danh" in cols_b else 0
+    default_name_b = cols_b.index("Họ và tên") if "Họ và tên" in cols_b else 0
+    default_dob_b = cols_b.index("NTNS") if "NTNS" in cols_b else 0
 
-  st.subheader(
-      "🔍 2. Danh sách trùng Họ tên & khớp/gần đúng Năm sinh (Chưa khớp CCCD):"
-      f" {len(df_matched_by_name)} người"
-  )
-  if not df_matched_by_name.empty:
-    st.dataframe(df_matched_by_name.head(100), use_container_width=True)
-  else:
-    st.info("Không tìm thấy trường hợp trùng tên nào khác.")
-
-  # Tạo file Excel kết quả để tải xuống
-  output = io.BytesIO()
-  with pd.ExcelWriter(output, engine="openpyxl") as writer:
-    matched_by_cccd.to_excel(writer, sheet_name="Khop_CCCD", index=False)
-    if not df_matched_by_name.empty:
-      df_matched_by_name.to_excel(
-          writer, sheet_name="Khop_Theo_Ten_Va_Nam_Sinh", index=False
+    col_opt1, col_opt2 = st.columns(2)
+    with col_opt1:
+      st.subheader("Cấu hình Tệp A")
+      col_cccd_a = st.selectbox(
+          "Cột CCCD / Định danh (Tệp A)", cols_a, index=default_cccd_a
       )
-  processed_data = output.getvalue()
+      col_name_a = st.selectbox("Cột Họ và tên (Tệp A)", cols_a, index=default_name_a)
+      col_dob_a = st.selectbox(
+          "Cột Ngày sinh / Năm sinh (Tệp A)", cols_a, index=default_dob_a
+      )
 
-  st.sidebar.markdown("---")
-  st.sidebar.success("Trạng thái: Sẵn sàng xuất báo cáo!")
-  st.sidebar.download_button(
-      label="📥 Tải xuống File Kết Quả Tổng Hợp (.xlsx)",
-      data=processed_data,
-      file_name="Ket_qua_doi_soat_BHYT_UBND.xlsx",
-      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  )
+    with col_opt2:
+      st.subheader("Cấu hình Tệp B")
+      col_cccd_b = st.selectbox(
+          "Cột CCCD / Định danh (Tệp B)", cols_b, index=default_cccd_b
+      )
+      col_name_b = st.selectbox("Cột Họ và tên (Tệp B)", cols_b, index=default_name_b)
+      col_dob_b = st.selectbox(
+          "Cột Ngày sinh / Năm sinh (Tệp B)", cols_b, index=default_dob_b
+      )
 
-except Exception as e:
-  st.error(f"Đã xảy ra lỗi trong quá trình xử lý: {e}")
+    # --- XỬ LÝ DỮ LIỆU ---
+    df_a["CCCD_CLN"] = df_a[col_cccd_a].apply(clean_cccd)
+    df_b["CCCD_CLN"] = df_b[col_cccd_b].apply(clean_cccd)
+
+    df_a["HO_TEN_CLN"] = df_a[col_name_a].apply(clean_text)
+    df_b["HO_TEN_CLN"] = df_b[col_name_b].apply(clean_text)
+
+    df_a["NAM_SINH"] = df_a[col_dob_a].apply(extract_year)
+    df_b["NAM_SINH"] = df_b[col_dob_b].apply(extract_year)
+
+    st.markdown("---")
+    m1, m2 = st.columns(2)
+    m1.metric("Tổng bản ghi Tệp A", f"{len(df_a):,}")
+    m2.metric("Tổng bản ghi Tệp B (Dân cư)", f"{len(df_b):,}")
+
+    # 1. Khớp chính xác qua CCCD
+    matched_by_cccd = pd.merge(
+        df_a, df_b, on="CCCD_CLN", how="inner", suffixes=("_a", "_b")
+    )
+
+    st.subheader(
+        f"✅ 1. Khớp chính xác theo Số CCCD / Định danh ({len(matched_by_cccd)}"
+        " người)"
+    )
+    if not matched_by_cccd.empty:
+      st.dataframe(matched_by_cccd.head(100), use_container_width=True)
+    else:
+      st.info("Không tìm thấy bản ghi khớp tuyệt đối theo CCCD.")
+
+    # 2. Xử lý các trường hợp chưa khớp CCCD -> Khớp Họ tên & Năm sinh trong khoảng chênh lệch
+    unmatched_a = df_a[~df_a["CCCD_CLN"].isin(matched_by_cccd["CCCD_CLN"])]
+
+    matched_by_name_list = []
+    for idx, row in unmatched_a.iterrows():
+      name = row["HO_TEN_CLN"]
+      yob = row["NAM_SINH"]
+
+      candidates = df_b[df_b["HO_TEN_CLN"] == name]
+      if not candidates.empty:
+        if yob is not None:
+          candidates = candidates.copy()
+          candidates["diff"] = abs(candidates["NAM_SINH"] - yob)
+          # Lọc theo dung sai năm sinh được chọn (tolerance_years)
+          candidates = candidates[candidates["diff"] <= tolerance_years]
+          candidates = candidates.sort_values(by="diff")
+
+        if not candidates.empty:
+          best_match = candidates.iloc[0]
+          combined_dict = {}
+          for col in df_a.columns:
+            combined_dict[f"{col}_a"] = row[col]
+          for col in df_b.columns:
+            combined_dict[f"{col}_b"] = best_match[col]
+          combined_dict["chenh_lech_nam_sinh"] = best_match["diff"]
+          matched_by_name_list.append(combined_dict)
+
+    df_matched_by_name = (
+        pd.DataFrame(matched_by_name_list)
+        if matched_by_name_list
+        else pd.DataFrame()
+    )
+
+    st.subheader(
+        f"🔍 2. Trùng Họ tên & Lệch năm sinh trong khoảng [±{tolerance_years}"
+        f" tuổi]: {len(df_matched_by_name)} người"
+    )
+    if not df_matched_by_name.empty:
+      st.dataframe(df_matched_by_name.head(100), use_container_width=True)
+    else:
+      st.info(
+          "Không tìm thấy trường hợp trùng tên nào thỏa mãn khoảng chênh lệch"
+          " năm sinh này."
+      )
+
+    # --- TẠO FILE EXCEL XUẤT BÁO CÁO ---
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+      matched_by_cccd.to_excel(writer, sheet_name="Khop_Chinh_Xac_CCCD", index=False)
+      if not df_matched_by_name.empty:
+        df_matched_by_name.to_excel(
+            writer, sheet_name="Khop_Theo_Ten_Va_Nam_Sinh", index=False
+        )
+    processed_data = output.getvalue()
+
+    st.sidebar.markdown("---")
+    st.sidebar.success("Trạng thái: Sẵn sàng xuất báo cáo!")
+    st.sidebar.download_button(
+        label="📥 Tải xuống File Kết Quả (.xlsx)",
+        data=processed_data,
+        file_name="Ket_qua_doi_soat_thong_minh.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+  except Exception as e:
+    st.error(f"Đã xảy ra lỗi khi xử lý tệp: {e}")
+else:
   st.info(
-      "Vui lòng kiểm tra lại xem 2 file Excel đã được tải lên đầy đủ vào thư"
-      " mục gốc của GitHub hay chưa."
+      "👈 Vui lòng tải lên cả **Tệp A** và **Tệp B** ở thanh công cụ bên trái để"
+      " bắt đầu."
   )
