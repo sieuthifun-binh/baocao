@@ -12,12 +12,12 @@ st.title(
     " An Dương"
 )
 st.markdown(
-    "Hệ thống tự động đọc 2 tệp dữ liệu có sẵn trên Cloud, chuẩn hóa định dạng"
-    " **CCCD/Định danh** (khôi phục số 0 đầu chuỗi), đối soát chính xác và tìm"
-    " kiếm theo **Họ tên & Năm sinh gần đúng**."
+    "Hệ thống tự động đọc dữ liệu từ Cloud, chuẩn hóa định dạng **CCCD/Định"
+    " danh**, đối soát chính xác và tìm kiếm theo **Họ tên & Năm sinh gần"
+    " đúng**."
 )
 
-# Tên 2 file dữ liệu được đặt sẵn cùng thư mục trên GitHub
+# Tên 2 file dữ liệu lưu trên GitHub
 BHYT_PATH = "BHYT_03108  bình đồng bộ cccd.xlsx"
 UBND_PATH = "21.8.2026 nhân khẩu thường trú gửi UBND p AD.xlsx"
 
@@ -28,14 +28,13 @@ def load_and_process_data():
   df_bhyt = pd.read_excel(BHYT_PATH, sheet_name=0)
   df_ubnd = pd.read_excel(UBND_PATH, sheet_name="Sheet1")
 
-  # Hàm chuẩn hóa số CCCD / Định danh (đảm bảo đủ 12 chữ số bằng cách thêm số 0 nếu thiếu)
+  # Hàm chuẩn hóa số CCCD / Định danh (đảm bảo đủ 12 chữ số)
   def clean_cccd(val):
     if pd.isna(val):
       return ""
-    # Xóa bỏ đuôi .0 nếu xuất hiện do pandas đọc dạng số
     s = str(val).split(".")[0].strip().upper()
     if s.isdigit() and len(s) < 12:
-      s = s.zfill(12)  # Bổ sung đủ 12 chữ số cho CCCD Việt Nam
+      s = s.zfill(12)
     return s
 
   def clean_text(text):
@@ -49,7 +48,7 @@ def load_and_process_data():
     match = re.search(r"\b(19\d{2}|20\d{2})\b", str(val))
     return int(match.group(1)) if match else None
 
-  # Tạo các cột chuẩn hóa
+  # Tạo các cột phụ trợ chuẩn hóa
   df_bhyt["CCCD_CLN"] = df_bhyt["SO_CMND"].apply(clean_cccd)
   df_ubnd["CCCD_CLN"] = df_ubnd["Đinh danh"].apply(clean_cccd)
 
@@ -85,7 +84,10 @@ try:
       f"✅ 1. Danh sách khớp chính xác theo Số CCCD / Định danh ("
       f"{len(matched_by_cccd)} người)"
   )
-  st.dataframe(matched_by_cccd.head(100), use_container_width=True)
+  if not matched_by_cccd.empty:
+    st.dataframe(matched_by_cccd.head(100), use_container_width=True)
+  else:
+    st.info("Không có bản ghi nào trùng khớp tuyệt đối theo CCCD.")
 
   # 2. Xử lý các trường hợp chưa khớp CCCD -> Khớp theo Họ Tên và Năm sinh gần đúng
   unmatched_bhyt = df_bhyt[~df_bhyt["CCCD_CLN"].isin(matched_by_cccd["CCCD_CLN"])]
@@ -97,13 +99,22 @@ try:
 
     candidates = df_ubnd[df_ubnd["HO_TEN_CLN"] == name]
     if not candidates.empty:
-      if yob:
+      if yob is not None:
         candidates = candidates.copy()
         candidates["diff"] = abs(candidates["NAM_SINH"] - yob)
         candidates = candidates.sort_values(by="diff")
-      best_match = candidates.iloc[0].copy()
-      combined = pd.concat([row, best_match], axis=0)
-      matched_by_name_list.append(combined)
+      best_match = candidates.iloc[0]
+
+      # Gộp dữ liệu thành dictionary với hậu tố rõ ràng để tránh trùng lặp tên cột
+      combined_dict = {}
+      for col in df_bhyt.columns:
+        combined_dict[f"{col}_bhyt"] = row[col]
+      for col in df_ubnd.columns:
+        combined_dict[f"{col}_ubnd"] = best_match[col]
+      if "diff" in candidates.columns:
+        combined_dict["chenh_lech_nam_ sinh"] = best_match["diff"]
+
+      matched_by_name_list.append(combined_dict)
 
   df_matched_by_name = (
       pd.DataFrame(matched_by_name_list)
@@ -140,7 +151,8 @@ try:
   )
 
 except Exception as e:
-  st.error(
-      f"Đã xảy ra lỗi trong quá trình xử lý dữ liệu: {e}. Vui lòng kiểm tra lại"
-      " tên file Excel trên GitHub."
+  st.error(f"Đã xảy ra lỗi trong quá trình xử lý: {e}")
+  st.info(
+      "Vui lòng kiểm tra lại xem 2 file Excel đã được tải lên đầy đủ vào thư"
+      " mục gốc của GitHub hay chưa."
   )
